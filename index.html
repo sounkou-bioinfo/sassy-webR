@@ -243,7 +243,16 @@
         });
         shelter = await new webR.Shelter();
         await runR("library(Rsassy)");
-        const features = await runR("f <- sassy_features(); cat(paste(names(f), unlist(f), sep = ': ', collapse = '\\n'), '\\n')");
+        const features = await runR(`
+if ("sassy_features" %in% getNamespaceExports("Rsassy")) {
+  f <- Rsassy::sassy_features()
+  cat(paste(names(f), unlist(f), sep = ': ', collapse = '\\n'), '\\n')
+} else {
+  cat('sassy_features: unavailable in this Rsassy build\\n')
+  cat('package_version: ', as.character(utils::packageVersion('Rsassy')), '\\n', sep = '')
+  cat('note: r-universe may not have rebuilt the latest Rsassy commit yet.\\n')
+}
+`);
         featuresNode.textContent = features.trim();
         runButton.disabled = false;
         setStatus("ready", "success");
