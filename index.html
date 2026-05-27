@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>sassy webR</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <style>
+    :root { color-scheme: light; }
+    body {
+      background: radial-gradient(circle at top right, rgba(13,110,253,.12), transparent 32%),
+                  radial-gradient(circle at bottom left, rgba(25,135,84,.12), transparent 30%),
+                  #f8f9fa;
+      min-height: 100vh;
+    }
+    .brand { letter-spacing: -0.05em; }
+    textarea { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+    pre { white-space: pre-wrap; word-break: break-word; }
+    .table-wrap { max-height: 360px; overflow: auto; }
+  </style>
+</head>
+<body>
+  <main class="container py-5">
+    <div class="row justify-content-center">
+      <div class="col-lg-10 col-xl-9">
+        <header class="text-center mb-4">
+          <h1 class="display-4 fw-bold brand">sassy webR</h1>
+          <p class="lead mb-2">Approximate string matching in the browser with <code>Rsassy</code>, webR, and WebAssembly.</p>
+          <p class="text-muted small mb-0">
+            The R package is installed from
+            <a href="https://sounkou-bioinfo.r-universe.dev/Rsassy" target="_blank" rel="noopener">sounkou-bioinfo.r-universe.dev</a>.
+            Inputs stay in your browser.
+          </p>
+        </header>
+
+        <div class="card shadow-sm mb-4">
+          <div class="card-body">
+            <div class="d-flex gap-2 align-items-center flex-wrap mb-3">
+              <button id="init" class="btn btn-primary">Start webR + Rsassy</button>
+              <span id="status" class="badge text-bg-secondary">idle</span>
+            </div>
+            <pre id="log" class="bg-light border rounded p-3 small mb-0" style="min-height: 90px;"></pre>
+          </div>
+        </div>
+
+        <div class="card shadow-sm mb-4">
+          <div class="card-body">
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label for="pattern" class="form-label fw-semibold">Pattern</label>
+                <textarea id="pattern" class="form-control" rows="4">ATCGATCG</textarea>
+              </div>
+              <div class="col-md-6">
+                <label for="text" class="form-label fw-semibold">Text</label>
+                <textarea id="text" class="form-control" rows="4">GGGGATCGATCGTTTT</textarea>
+              </div>
+              <div class="col-sm-3">
+                <label for="alphabet" class="form-label fw-semibold">Alphabet</label>
+                <select id="alphabet" class="form-select">
+                  <option value="dna" selected>dna</option>
+                  <option value="iupac">iupac</option>
+                  <option value="ascii">ascii</option>
+                </select>
+              </div>
+              <div class="col-sm-3">
+                <label for="k" class="form-label fw-semibold">Maximum edit distance</label>
+                <input id="k" class="form-control" type="number" min="0" step="1" value="1">
+              </div>
+              <div class="col-sm-3 d-flex align-items-end">
+                <div class="form-check">
+                  <input id="rc" class="form-check-input" type="checkbox" checked>
+                  <label for="rc" class="form-check-label">Search reverse complement</label>
+                </div>
+              </div>
+              <div class="col-sm-3 d-flex align-items-end">
+                <div class="form-check">
+                  <input id="all" class="form-check-input" type="checkbox">
+                  <label for="all" class="form-check-label">Return all end positions</label>
+                </div>
+              </div>
+            </div>
+            <div class="d-flex gap-2 mt-4">
+              <button id="run" class="btn btn-success" disabled>Search</button>
+              <button id="example" class="btn btn-outline-secondary" type="button">Reset example</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card shadow-sm mb-4">
+          <div class="card-header fw-semibold">Matches</div>
+          <div class="card-body">
+            <div id="matches" class="table-wrap text-muted">No search run yet.</div>
+          </div>
+        </div>
+
+        <div class="card shadow-sm mb-4">
+          <div class="card-header fw-semibold">Build and runtime features</div>
+          <div class="card-body">
+            <pre id="features" class="bg-light border rounded p-3 small mb-0">Start webR to inspect Rsassy features.</pre>
+          </div>
+        </div>
+
+        <footer class="text-center text-muted small py-4">
+          <a href="https://github.com/sounkou-bioinfo/sassy-webR" target="_blank" rel="noopener">sassy-webR source</a>
+          ·
+          <a href="https://github.com/RagnarGrootKoerkamp/sassy" target="_blank" rel="noopener">sassy</a>
+          ·
+          <a href="https://docs.r-wasm.org/webr/latest/" target="_blank" rel="noopener">webR</a>
+        </footer>
+      </div>
+    </div>
+  </main>
+
+  <script type="module">
+    import { WebR } from "https://webr.r-wasm.org/latest/webr.mjs";
+
+    const initButton = document.getElementById("init");
+    const runButton = document.getElementById("run");
+    const exampleButton = document.getElementById("example");
+    const statusNode = document.getElementById("status");
+    const logNode = document.getElementById("log");
+    const featuresNode = document.getElementById("features");
+    const matchesNode = document.getElementById("matches");
+
+    const inputs = {
+      pattern: document.getElementById("pattern"),
+      text: document.getElementById("text"),
+      alphabet: document.getElementById("alphabet"),
+      k: document.getElementById("k"),
+      rc: document.getElementById("rc"),
+      all: document.getElementById("all"),
+    };
+
+    let webR = null;
+    let shelter = null;
+    let initPromise = null;
+
+    function setStatus(text, kind = "secondary") {
+      statusNode.className = `badge text-bg-${kind}`;
+      statusNode.textContent = text;
+    }
+
+    function log(line) {
+      logNode.textContent += `${line}\n`;
+      logNode.scrollTop = logNode.scrollHeight;
+    }
+
+    function rString(value) {
+      return `'${value
+        .replaceAll("\\", "\\\\")
+        .replaceAll("'", "\\'")
+        .replaceAll("\n", "\\n")
+        .replaceAll("\r", "\\r")}'`;
+    }
+
+    function outputText(outputs) {
+      return outputs.map((entry) => {
+        if (typeof entry?.data === "string") return entry.data;
+        if (entry?.data?.text) return entry.data.text;
+        if (entry?.type === "stdout" || entry?.type === "stderr") return String(entry.data ?? "");
+        return "";
+      }).join("");
+    }
+
+    async function runR(code) {
+      if (!shelter) throw new Error("webR is not ready");
+      return outputText(await shelter.captureR(code, { withAutoprint: false }));
+    }
+
+    function parseTsv(text) {
+      const lines = text.trim().split(/\r?\n/).filter(Boolean);
+      if (!lines.length) return { header: [], rows: [] };
+      const header = lines[0].split("\t");
+      const rows = lines.slice(1).map(line => line.split("\t"));
+      return { header, rows };
+    }
+
+    function renderTable(tsv) {
+      const { header, rows } = parseTsv(tsv);
+      if (!header.length) {
+        matchesNode.className = "text-muted";
+        matchesNode.textContent = "No output.";
+        return;
+      }
+      const table = document.createElement("table");
+      table.className = "table table-sm table-striped table-hover align-middle mb-0";
+      const thead = document.createElement("thead");
+      const trHead = document.createElement("tr");
+      for (const col of header) {
+        const th = document.createElement("th");
+        th.textContent = col;
+        trHead.appendChild(th);
+      }
+      thead.appendChild(trHead);
+      table.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      for (const row of rows) {
+        const tr = document.createElement("tr");
+        for (const cell of row) {
+          const td = document.createElement("td");
+          td.textContent = cell;
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      matchesNode.className = "table-wrap";
+      matchesNode.replaceChildren(table);
+      if (!rows.length) {
+        const note = document.createElement("div");
+        note.className = "text-muted small mt-2";
+        note.textContent = "No matches for the current input.";
+        matchesNode.appendChild(note);
+      }
+    }
+
+    async function initialize() {
+      if (initPromise) return initPromise;
+      initPromise = (async () => {
+        initButton.disabled = true;
+        setStatus("starting", "warning");
+        log("Starting webR...");
+        webR = new WebR();
+        await webR.init();
+        log("Installing Rsassy from r-universe...");
+        await webR.installPackages(["Rsassy"], {
+          repos: ["https://sounkou-bioinfo.r-universe.dev", "https://repo.r-wasm.org/"],
+          mount: false,
+        });
+        shelter = await new webR.Shelter();
+        await runR("library(Rsassy)");
+        const features = await runR("f <- sassy_features(); cat(paste(names(f), unlist(f), sep = ': ', collapse = '\\n'), '\\n')");
+        featuresNode.textContent = features.trim();
+        runButton.disabled = false;
+        setStatus("ready", "success");
+        log("Rsassy is ready.");
+      })().catch((error) => {
+        console.error(error);
+        setStatus("failed", "danger");
+        initButton.disabled = false;
+        initPromise = null;
+        log(`ERROR: ${error?.message ?? String(error)}`);
+        throw error;
+      });
+      return initPromise;
+    }
+
+    async function search() {
+      await initialize();
+      const k = Math.max(0, Math.floor(Number(inputs.k.value || 0)));
+      const code = `
+pattern <- ${rString(inputs.pattern.value)}
+text <- ${rString(inputs.text.value)}
+matches <- sassy_search(
+  pattern,
+  text,
+  k = ${k},
+  alphabet = '${inputs.alphabet.value}',
+  rc = ${inputs.rc.checked ? "TRUE" : "FALSE"},
+  all = ${inputs.all.checked ? "TRUE" : "FALSE"}
+)
+utils::write.table(matches, file = '', sep = '\\t', row.names = FALSE, quote = FALSE)
+`;
+      setStatus("searching", "warning");
+      runButton.disabled = true;
+      try {
+        const tsv = await runR(code);
+        renderTable(tsv);
+        setStatus("ready", "success");
+      } catch (error) {
+        console.error(error);
+        matchesNode.className = "text-danger";
+        matchesNode.textContent = error?.message ?? String(error);
+        setStatus("error", "danger");
+      } finally {
+        runButton.disabled = false;
+      }
+    }
+
+    initButton.addEventListener("click", () => void initialize());
+    runButton.addEventListener("click", () => void search());
+    exampleButton.addEventListener("click", () => {
+      inputs.pattern.value = "ATCGATCG";
+      inputs.text.value = "GGGGATCGATCGTTTT";
+      inputs.alphabet.value = "dna";
+      inputs.k.value = "1";
+      inputs.rc.checked = true;
+      inputs.all.checked = false;
+    });
+  </script>
+</body>
+</html>
