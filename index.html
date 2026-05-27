@@ -162,19 +162,31 @@
               ? [capture]
               : [];
 
-      return entries.map((entry) => {
+      const parts = entries.map((entry) => {
         if (typeof entry === "string") return entry;
         if (typeof entry?.data === "string") return entry.data;
         if (entry?.data?.text) return entry.data.text;
         if (entry?.type === "stdout" || entry?.type === "stderr") return String(entry.data ?? "");
         return "";
-      }).join("");
+      }).filter((part) => part.length > 0);
+
+      // webR captureR() may return one stdout entry per printed line, without
+      // trailing newlines. Reinsert them so TSV output remains row-oriented.
+      if (parts.length > 1 && !parts.some((part) => part.includes("\n"))) {
+        return parts.join("\n") + "\n";
+      }
+      return parts.join("");
     }
 
     async function runR(code) {
       if (!shelter) throw new Error("webR is not ready");
       const capture = await shelter.captureR(code, { withAutoprint: false });
       return outputText(capture);
+    }
+
+    async function readWebRText(path) {
+      const bytes = await webR.FS.readFile(path);
+      return new TextDecoder().decode(bytes);
     }
 
     function parseTsv(text) {
@@ -239,17 +251,20 @@
         });
         shelter = await new webR.Shelter();
         await runR("library(Rsassy)");
-        const features = await runR(`
+        await runR(`
 if ("sassy_features" %in% getNamespaceExports("Rsassy")) {
   f <- Rsassy::sassy_features()
-  cat(paste(names(f), unlist(f), sep = ': ', collapse = '\\n'), '\\n')
+  lines <- paste(names(f), unlist(f), sep = ': ')
 } else {
-  cat('sassy_features: unavailable in this Rsassy build\\n')
-  cat('package_version: ', as.character(utils::packageVersion('Rsassy')), '\\n', sep = '')
-  cat('note: r-universe may not have rebuilt the latest Rsassy commit yet.\\n')
+  lines <- c(
+    'sassy_features: unavailable in this Rsassy build',
+    paste0('package_version: ', as.character(utils::packageVersion('Rsassy'))),
+    'note: r-universe may not have rebuilt the latest Rsassy commit yet.'
+  )
 }
+writeLines(lines, 'sassy_features.txt')
 `);
-        featuresNode.textContent = features.trim();
+        featuresNode.textContent = (await readWebRText("sassy_features.txt")).trim();
         runButton.disabled = false;
         setStatus("ready", "success");
         log("Rsassy is ready.");
@@ -278,12 +293,13 @@ matches <- sassy_search(
   rc = ${inputs.rc.checked ? "TRUE" : "FALSE"},
   all = ${inputs.all.checked ? "TRUE" : "FALSE"}
 )
-utils::write.table(matches, file = '', sep = '\\t', row.names = FALSE, quote = FALSE)
+utils::write.table(matches, file = 'sassy_matches.tsv', sep = '\\t', row.names = FALSE, quote = FALSE)
 `;
       setStatus("searching", "warning");
       runButton.disabled = true;
       try {
-        const tsv = await runR(code);
+        await runR(code);
+        const tsv = await readWebRText("sassy_matches.tsv");
         renderTable(tsv);
         setStatus("ready", "success");
       } catch (error) {
