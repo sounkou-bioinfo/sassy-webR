@@ -6,7 +6,7 @@ The page runs fully in the browser with [webR](https://docs.r-wasm.org/webr/late
 
 1. starts a webR runtime,
 2. installs the WebAssembly build of `Rsassy` from r-universe,
-3. runs `sassy_search()` on user-provided pattern/text strings,
+3. runs `sassy_search()` on user-provided pattern/text strings, with optional `match_region` output in the result table.
 4. supports a CRISPR mode using `sassy_crispr()` with guide/text input,
 5. shows `sassy_features()` so the wasm SIMD build can be inspected.
 

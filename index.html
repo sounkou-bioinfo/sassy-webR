@@ -80,6 +80,12 @@
                   <option value="crispr">CRISPR guide search</option>
                 </select>
               </div>
+              <div class="col-sm-3">
+                <div class="form-check">
+                  <input id="match-region" class="form-check-input" type="checkbox">
+                  <label for="match-region" class="form-check-label">Display match_region</label>
+                </div>
+              </div>
             </div>
             <div id="crispr-options" class="row g-3 mt-2 d-none">
               <div class="col-sm-3">
@@ -153,6 +159,7 @@
       k: document.getElementById("k"),
       rc: document.getElementById("rc"),
       all: document.getElementById("all"),
+      matchRegion: document.getElementById("match-region"),
       mode: document.getElementById("mode"),
       pamLength: document.getElementById("pam-length"),
       maxNFrac: document.getElementById("max-n-frac"),
@@ -206,7 +213,11 @@
       inputs.textLabel.textContent = "Text";
       if (isCrispr) {
         inputs.all.checked = false;
+        inputs.matchRegion.disabled = true;
+        inputs.matchRegion.checked = false;
         inputs.alphabet.value = "dna";
+      } else {
+        inputs.matchRegion.disabled = false;
       }
     }
 
@@ -382,7 +393,8 @@ matches <- sassy_search(
   k = ${k},
   alphabet = '${inputs.alphabet.value}',
   rc = ${inputs.rc.checked ? "TRUE" : "FALSE"},
-  all = ${inputs.all.checked ? "TRUE" : "FALSE"}
+  all = ${inputs.all.checked ? "TRUE" : "FALSE"},
+  match_region = ${inputs.matchRegion.checked ? "TRUE" : "FALSE"}
 )
 `;
       }
