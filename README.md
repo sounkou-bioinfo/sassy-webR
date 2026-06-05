@@ -7,7 +7,10 @@ The page runs fully in the browser with [webR](https://docs.r-wasm.org/webr/late
 1. starts a webR runtime,
 2. installs the WebAssembly build of `Rsassy` from r-universe,
 3. runs `sassy_search()` on user-provided pattern/text strings,
-4. shows `sassy_features()` so the wasm SIMD build can be inspected.
+4. supports a CRISPR mode using `sassy_crispr()` with guide/text input,
+5. shows `sassy_features()` so the wasm SIMD build can be inspected.
+
+For both modes, input rows are sent as character vectors in R lists (required by the current `Rsassy` API). In CRISPR mode, guide sequences should include a common PAM suffix.
 
 ## Local test
 

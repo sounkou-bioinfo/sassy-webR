@@ -42,11 +42,11 @@
           <div class="card-body">
             <div class="row g-3">
               <div class="col-md-6">
-                <label for="pattern" class="form-label fw-semibold">Pattern</label>
+                <label id="pattern-label" for="pattern" class="form-label fw-semibold">Pattern</label>
                 <textarea id="pattern" class="form-control" rows="4">ATCGATCG</textarea>
               </div>
               <div class="col-md-6">
-                <label for="text" class="form-label fw-semibold">Text</label>
+                <label id="text-label" for="text" class="form-label fw-semibold">Text</label>
                 <textarea id="text" class="form-control" rows="4">GGGGATCGATCGTTTT</textarea>
               </div>
               <div class="col-sm-3">
@@ -73,10 +73,34 @@
                   <label for="all" class="form-check-label">Return all end positions</label>
                 </div>
               </div>
+              <div class="col-sm-3">
+                <label for="mode" class="form-label fw-semibold">Mode</label>
+                <select id="mode" class="form-select">
+                  <option value="search" selected>Pattern search</option>
+                  <option value="crispr">CRISPR guide search</option>
+                </select>
+              </div>
+            </div>
+            <div id="crispr-options" class="row g-3 mt-2 d-none">
+              <div class="col-sm-3">
+                <label for="pam-length" class="form-label fw-semibold">PAM length</label>
+                <input id="pam-length" class="form-control" type="number" min="1" step="1" value="3">
+              </div>
+              <div class="col-sm-3">
+                <label for="max-n-frac" class="form-label fw-semibold">Max N fraction</label>
+                <input id="max-n-frac" class="form-control" type="number" min="0" max="1" step="0.1" value="0.2">
+              </div>
+              <div class="col-sm-3 d-flex align-items-end">
+                <div class="form-check">
+                  <input id="allow-pam-edits" class="form-check-input" type="checkbox">
+                  <label for="allow-pam-edits" class="form-check-label">Allow PAM edits</label>
+                </div>
+              </div>
             </div>
             <div class="d-flex gap-2 mt-4">
               <button id="run" class="btn btn-success" disabled>Search</button>
-              <button id="example" class="btn btn-outline-secondary" type="button">Reset example</button>
+              <button id="example" class="btn btn-outline-secondary" type="button">Search example</button>
+              <button id="example-crispr" class="btn btn-outline-secondary" type="button">CRISPR example</button>
             </div>
           </div>
         </div>
@@ -113,6 +137,8 @@
     const initButton = document.getElementById("init");
     const runButton = document.getElementById("run");
     const exampleButton = document.getElementById("example");
+    const crisprExampleButton = document.getElementById("example-crispr");
+    const crisprOptionsNode = document.getElementById("crispr-options");
     const statusNode = document.getElementById("status");
     const logNode = document.getElementById("log");
     const featuresNode = document.getElementById("features");
@@ -121,10 +147,16 @@
     const inputs = {
       pattern: document.getElementById("pattern"),
       text: document.getElementById("text"),
+      patternLabel: document.getElementById("pattern-label"),
+      textLabel: document.getElementById("text-label"),
       alphabet: document.getElementById("alphabet"),
       k: document.getElementById("k"),
       rc: document.getElementById("rc"),
       all: document.getElementById("all"),
+      mode: document.getElementById("mode"),
+      pamLength: document.getElementById("pam-length"),
+      maxNFrac: document.getElementById("max-n-frac"),
+      allowPamEdits: document.getElementById("allow-pam-edits"),
     };
 
     let webR = null;
@@ -147,6 +179,35 @@
         .replaceAll("'", "\\'")
         .replaceAll("\n", "\\n")
         .replaceAll("\r", "\\r")}'`;
+    }
+
+    function splitSequences(value) {
+      return String(value || "")
+        .replace(/\r/g, "")
+        .split("\n")
+        .map((line) => line.replace(/\s+/g, "").trim())
+        .filter(Boolean);
+    }
+
+    function toRCharacterVector(values) {
+      if (!values.length) {
+        return "character(0)";
+      }
+      return `list(${values.map(rString).join(", ")})`;
+    }
+
+    function updateModeUi() {
+      const isCrispr = inputs.mode.value === "crispr";
+      crisprOptionsNode.classList.toggle("d-none", !isCrispr);
+      inputs.alphabet.disabled = isCrispr;
+      inputs.all.disabled = isCrispr;
+      runButton.textContent = isCrispr ? "Run CRISPR" : "Search";
+      inputs.patternLabel.textContent = isCrispr ? "Guide(s)" : "Pattern";
+      inputs.textLabel.textContent = "Text";
+      if (isCrispr) {
+        inputs.all.checked = false;
+        inputs.alphabet.value = "dna";
+      }
     }
 
     function outputText(capture) {
@@ -282,11 +343,39 @@ writeLines(lines, 'sassy_features.txt')
     async function search() {
       await initialize();
       const k = Math.max(0, Math.floor(Number(inputs.k.value || 0)));
-      const pattern = (inputs.pattern.value || "").trim();
-      const text = (inputs.text.value || "").trim();
-      const code = `
-pattern <- list(${rString(pattern)})
-text <- list(${rString(text)})
+      const sequenceEntries = splitSequences(inputs.pattern.value);
+      const textEntries = splitSequences(inputs.text.value);
+      if (!sequenceEntries.length || !textEntries.length) {
+        matchesNode.className = "text-danger";
+        matchesNode.textContent = "Pattern (or guide) and text must contain at least one non-empty sequence.";
+        setStatus("input error", "danger");
+        return;
+      }
+
+      const patternCode = toRCharacterVector(sequenceEntries);
+      const textCode = toRCharacterVector(textEntries);
+      let code;
+      if (inputs.mode.value === "crispr") {
+        const pamLength = Math.max(1, Math.floor(Number(inputs.pamLength.value || 3)));
+        const maxNFracInput = Number(inputs.maxNFrac.value || 0.2);
+        const maxNFrac = Number.isFinite(maxNFracInput) ? Math.max(0, Math.min(1, maxNFracInput)) : 0.2;
+        code = `
+guide <- ${patternCode}
+text <- ${textCode}
+matches <- sassy_crispr(
+  guide = guide,
+  text = text,
+  k = ${k},
+  pam_length = ${pamLength},
+  allow_pam_edits = ${inputs.allowPamEdits.checked ? "TRUE" : "FALSE"},
+  max_n_frac = ${maxNFrac},
+  rc = ${inputs.rc.checked ? "TRUE" : "FALSE"}
+)
+`;
+      } else {
+        code = `
+pattern <- ${patternCode}
+text <- ${textCode}
 matches <- sassy_search(
   pattern,
   text,
@@ -295,8 +384,10 @@ matches <- sassy_search(
   rc = ${inputs.rc.checked ? "TRUE" : "FALSE"},
   all = ${inputs.all.checked ? "TRUE" : "FALSE"}
 )
-utils::write.table(matches, file = 'sassy_matches.tsv', sep = '\\t', row.names = FALSE, quote = FALSE)
 `;
+      }
+      code += "utils::write.table(matches, file = 'sassy_matches.tsv', sep = '\\t', row.names = FALSE, quote = FALSE)\n";
+
       setStatus("searching", "warning");
       runButton.disabled = true;
       try {
@@ -316,7 +407,11 @@ utils::write.table(matches, file = 'sassy_matches.tsv', sep = '\\t', row.names =
 
     initButton.addEventListener("click", () => void initialize());
     runButton.addEventListener("click", () => void search());
+    inputs.mode.addEventListener("change", updateModeUi);
+
     exampleButton.addEventListener("click", () => {
+      inputs.mode.value = "search";
+      updateModeUi();
       inputs.pattern.value = "ATCGATCG";
       inputs.text.value = "GGGGATCGATCGTTTT";
       inputs.alphabet.value = "dna";
@@ -324,6 +419,20 @@ utils::write.table(matches, file = 'sassy_matches.tsv', sep = '\\t', row.names =
       inputs.rc.checked = true;
       inputs.all.checked = false;
     });
+
+    crisprExampleButton.addEventListener("click", () => {
+      inputs.mode.value = "crispr";
+      updateModeUi();
+      inputs.pattern.value = "ACCGTACGG\nTTTGTTCGG";
+      inputs.text.value = "TTTAGCGACCGTACGGTTT\nGGGTTTAGCGTTTGTTCGGTTT";
+      inputs.pamLength.value = "3";
+      inputs.maxNFrac.value = "0.2";
+      inputs.allowPamEdits.checked = false;
+      inputs.rc.checked = true;
+      inputs.k.value = "1";
+    });
+
+    updateModeUi();
   </script>
 </body>
 </html>
