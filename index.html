@@ -282,9 +282,11 @@ writeLines(lines, 'sassy_features.txt')
     async function search() {
       await initialize();
       const k = Math.max(0, Math.floor(Number(inputs.k.value || 0)));
+      const pattern = (inputs.pattern.value || "").trim();
+      const text = (inputs.text.value || "").trim();
       const code = `
-pattern <- ${rString(inputs.pattern.value)}
-text <- ${rString(inputs.text.value)}
+pattern <- list(${rString(pattern)})
+text <- list(${rString(text)})
 matches <- sassy_search(
   pattern,
   text,
